@@ -1,10 +1,16 @@
 # behavior_analysis
-This repository provides the code used to uncover the behavioral variables described in the master thesis 
+This repository provides the code used to uncover the behavioral variables described in the Master Thesis 
 
-The two scripts 
+Be aware that all of the scripts expect a specific folder structure to do session-wise extractions:
 
-BehaviorCSVReader 
-and 
-CSVDataReader
+Mouse-folder (Base path
+ |
+ +-- Sensor_csv
+ |    
+ +-- Top-folder # contains the dlc extracted coordinates from the top-mounted cameras
+ |  |  
+ |  +-- dlc_filtered.csv
 
-were originally part of another repo and are not under my license 
+   
+
+
