@@ -2,7 +2,7 @@
 """
 Created on Thu Apr 24 13:17:07 2025
 
-@author: Gulraiz.Iqbal
+@author: Gulraiz.Iqbal and Felixniebisch
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -53,7 +53,7 @@ def extract_trialwise_dlc_trajectories(beh_csv, dlc_csv, dlc_fps=25, bodypart="N
         coords = coords[coords[:, 2] > likelihood_thresh] # bade coordinates
         t = t[:coords.shape[0]]
         
-        #first_x, first_y = coords[0, 0], coords[0, 1]
+        #first_x, first_y = coords[0, 0], coords[0, 1] # uncomment if you want to analyze starting positions of trajectories
         #first_time = t[0]
         
         #print(f"Trial {i}: First coordinate = ({first_x:.1f}, {first_y:.1f}) at t = {(first_time / 1000) * 25:.1f} ms")
@@ -66,9 +66,9 @@ def extract_trialwise_dlc_trajectories(beh_csv, dlc_csv, dlc_fps=25, bodypart="N
         print(len(t))
         
                 
-        # Exclude trials not starting within defined radius
-        center_x, center_y = 600, 600  # adjust to your setup
-        start_radius_thresh = 90       # adjust to your definition of "start zone"
+        # Exclude trials not starting within middle sensor region
+        center_x, center_y = 600, 600  # position of middle sensor
+        start_radius_thresh = 90       
         start_x, start_y = coords[0, 0], coords[0, 1]
         dist_from_center = np.sqrt((start_x - center_x)**2 + (start_y - center_y)**2)
         if dist_from_center > start_radius_thresh:
@@ -86,6 +86,7 @@ def extract_trialwise_dlc_trajectories(beh_csv, dlc_csv, dlc_fps=25, bodypart="N
             valid_sides.append(None)
 
     return valid_trajs, valid_correctness, valid_sides # retain correctness and initial side of the trajectories for later analysis 
+
 def interpolate_space_time(traj, M=20):
     traj = np.array(traj)
     
@@ -222,7 +223,7 @@ def plot_cluster_distribution(labels_per_session, k):
     plt.show()
 #beh_csv_path = "/Volumes/Expansion/sem-data/M1791/M1791-250423-170044/M1791-250423-170044_cleaned.csv"
 #dlc_csv_path = "/Volumes/Expansion/sem-data/M1791/M1791-250423-170044/top/M1791-250423-1659-topDLC_resnet50_ObjectInteractionOct12shuffle1_200000_filtered.csv"
-base_path = "/Volumes/Expansion/Clusterdata/M1796/"
+base_path = "" # base path of mouse data 
 
 labels_per_session = []
 centroids_per_session = []
@@ -438,9 +439,9 @@ results_df = results_df[results_df["Spatiotemporal Variability"] <= 2000]
 
 import seaborn as sns
 import matplotlib.pyplot as plt
-from scipy.stats import pearsonr
 
 
+### manual renaming of identified clusters per mouse 
 rename_map = {
     "Cluster 0": "Low Waterport",
     "Cluster 1": "unclassfiable - mostly high water port",
@@ -463,7 +464,7 @@ sns.lineplot(
     marker="o",
     palette= {
     "Low Waterport": "green",
-    "unclassfiable - mostly high water port": "red",
+    "unclassfiable - mostly high water port": "red", # change this, depending on the colors detected
     "High Waterport": "blue",
     "ow Waterport" : "blue"
 } 
