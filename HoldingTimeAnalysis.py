@@ -12,6 +12,9 @@ import matplotlib.pyplot as plt
 import os        
 import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind
+from datetime import datetime
+
 
 class HoldingTimeAnalysis:
     def __init__(self, threshold=30):
@@ -169,7 +172,66 @@ class HoldingTimeAnalysis:
             
 
             
-
+ def plot_scatter_and_ttest(self, box_intervals, session_labels=None, mouse_id="Unknown"):
+        """
+        Plots scattered points per session and computes t-test for first vs. last session.
+        Also collects and returns a session-wise DataFrame of event counts >100ms.
+        """
+    
+        if not box_intervals or len(box_intervals) < 2:
+            print("Not enough sessions for t-test.")
+            return pd.DataFrame()
+    
+        session_count = len(box_intervals)
+        session_labels = session_labels or [str(i + 1) for i in range(session_count)]
+    
+        first_session = box_intervals[0]
+        last_session = box_intervals[-1]
+    
+        t_stat, p_val = ttest_ind(first_session, last_session, equal_var=False)
+        print(f"T-test between first and last: t = {t_stat:.3f}, p = {p_val:.5f}")
+    
+        # Scatter plot (optional visual)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        for i, session_data in enumerate(box_intervals):
+            x_vals = np.random.normal(i + 1, 0.08, size=len(session_data))
+            ax.scatter(x_vals, session_data, alpha=0.6, color='black', s=10)
+    
+        ax.set_xticks(np.arange(1, session_count + 1))
+        ax.set_xticklabels(session_labels, rotation=45, ha="right")
+        ax.set_ylabel("Holding Time (ms)")
+        ax.set_xlabel("Session")
+        ax.set_title(f"Mouse {mouse_id}")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        plt.tight_layout()
+        plt.show()
+    
+        # Collect event counts >100 ms
+        session_data = []
+        for i, session in enumerate(box_intervals):
+            date_label = session_labels[i]
+            try:
+                # Try parsing date if session label is a date string
+                parsed_date = datetime.strptime(date_label, "%Y-%m-%d")
+            except ValueError:
+                # If not, assign dummy ordered date
+                parsed_date = datetime.strptime(f"2025-01-{i+1:02}", "%Y-%m-%d")
+    
+            count_over_100 = sum(1 for val in session if val > 100)
+    
+            session_data.append({
+                "Mouse": mouse_id,
+                "Session": date_label,
+                "Date": parsed_date,
+                "EventCountOver100ms": count_over_100
+            })
+    
+        # Create and sort DataFrame
+        count_df = pd.DataFrame(session_data)
+        count_df = count_df.sort_values("Date").drop(columns=["Date"])
+        count_df.to_csv(f"/Volumes/Expansion/Holdingtimedfs/{mouse_id}_session_event_counts.csv", index=False)
+    
+        return count_df
 
 
 
@@ -274,7 +336,7 @@ class HoldingTimeAnalysis:
             plt.legend()
             plt.tight_layout()
             plt.show()        
-            
+            self.plot_scatter_and_ttest(box_intervals, session_labels, mouse_id="1797")
         if all_intervals:
             
             all_medians_df = pd.DataFrame(all_intervals)
