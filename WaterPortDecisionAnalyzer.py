@@ -23,10 +23,9 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Optional, Sequence
 from PIL import Image
 import sys
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.append(str(SCRIPT_DIR.parent))
 from BehaviorCSVReader import BehaviorCSVReader  
-from CSVDataReader     import CSVDataReader      
+from CSVDataReader     import CSVDataReader 
+from scipy.stats import friedmanchisquare     
 
 # helper function to create a spatial area around the WP coordinates
 def _in_circle(pt: np.ndarray, centre: Tuple[float, float], r: float) -> bool:
@@ -123,7 +122,8 @@ class WaterPortDecisionAnalyzer:
         if plot:
             mouse, sess = dlc_csv.name[4], dlc_csv.name[6:12]
             self._plot_session(paths, mouse, sess, bg_img)
-            self._plot_counts(stats, mouse, sess)
+            #self._plot_counts(stats, mouse, sess)
+
 
         return df, stats
 
@@ -212,7 +212,7 @@ class WaterPortDecisionAnalyzer:
         # background
         if bg_img is not None and Path(bg_img).is_file():
             img = Image.open(bg_img).resize((width, height), Image.Resampling.LANCZOS)
-            ax.imshow(img)
+            ax.imshow(img, origin="lower")
         elif bg_img:
             print("Background image not found:", bg_img)
 
@@ -231,29 +231,258 @@ class WaterPortDecisionAnalyzer:
                         'green', markersize=3, zorder=5)
 
         ax.set_xlabel("X"); ax.set_ylabel("Y")
-        ax.set_title(f"Trajectories — Mouse 00{mouse}, Session {session}")
         ax.legend(loc="upper right")
         plt.tight_layout(); plt.show()
 
-    @staticmethod
-    def _plot_counts(stats: Dict[str, float], mouse: str, session: str):
-        bias = stats["BiasRight_FP"]
-        bias_txt = f"Right ward bias = {bias*100:.1f}%" if not np.isnan(bias) else "Right ward bias = n/a"
 
-        # % correct per side
-        plt.figure(figsize=(4, 4))
-        plt.bar(["Corr%L", "Corr%R"], [stats["Correct_L"], stats["Correct_R"]],
-                color="green")
-        plt.ylim(0, 100); plt.ylabel("%")
-        plt.title(f"% correct per side — Mouse 00{mouse}, Sess {session}\n{bias_txt}")
-        plt.tight_layout(); plt.show()
+        plt.show()
 
-        # raw incorrect & alternations
-        plt.figure(figsize=(4, 4))
-        plt.bar(["Inc-L", "Inc-R", "Alt"],
-                [stats["Incorrect_L"], stats["Incorrect_R"], stats["TotalAlt"]],
-                color=["red", "red", "steelblue"])
-        ymax = max(stats["Incorrect_L"], stats["Incorrect_R"], stats["TotalAlt"]) * 1.1 + 1
-        plt.ylim(0, ymax); plt.ylabel("Count")
-        plt.title(f"Errors & alternations — Mouse 00{mouse}, Sess {session}")
-        plt.tight_layout(); plt.show()
+import os 
+
+def run_waterport_decision_analysis(base_path, low, high, radius, bg_img, out_dir):
+    analyzer = WaterPortDecisionAnalyzer(low, high, radius)
+
+    session_stats = []
+    summary_frames = []
+
+    # Helper functions
+    def find_top_folders(base_path):
+        # Collect only valid top folders and sort them for predictable order
+        top_folders = [Path(r) / 'top' for r, ds, _ in os.walk(base_path) if 'top' in ds]
+        return sorted(top_folders)  # ensures consistent and expected processing order
+    def match_beh(folder: Path):
+        for f in folder.parent.iterdir():
+            if f.suffix == '.csv' and not f.name.startswith('._'):
+                return f
+        return None
+
+    # base_path = Path(base_path)
+
+    for top in find_top_folders(base_path):
+        print('\n', top)
+        beh = match_beh(top)
+        if beh is None:
+            print('⚠ No behavior CSV in', top.parent)
+            continue
+
+        for dlc in top.glob('*filtered.csv'):
+            if dlc.name.startswith('._'):
+                continue
+            try:
+                df, stats = analyzer.analyse_session(beh, dlc, bg_img=bg_img)
+                if not df.empty:
+                    df.insert(0, 'Mouse', dlc.name[4])
+                    df.insert(1, 'Session', dlc.name[6:12])
+                    summary_frames.append(df)
+                    stats.update({'Mouse': dlc.name[4], 'Session': dlc.name[6:12]})
+                    session_stats.append(stats)
+            except Exception as e:
+                print('Error processing', dlc.name, '\n', e)
+
+    if summary_frames:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        pd.concat(summary_frames, ignore_index=True).to_csv(out_dir / 'waterport_decision_summary.csv', index=False)
+        stats_df = pd.DataFrame(session_stats)
+        stats_df.to_csv(out_dir / 'waterport_session_stats.csv', index=False)
+        print('✔ Saved summary & stats to', out_dir)
+
+        # ---- development plots ----
+        topickle(stats_df)
+        plot_development(stats_df)
+        plot_group_summary(stats_df)
+        plot_plots_group_summary(stats_df)
+
+        for mouse_id in stats_df["Mouse"].unique():
+            df_mouse = stats_df[stats_df["Mouse"] == mouse_id]
+            analyzer._plot_trials_vs_accuracy(df_mouse, mouse=mouse_id)
+    else:
+        print('No valid sessions processed.')
+
+def topickle(stats_df):
+    stats_df.to_pickle("/Volumes/Expansion/New_cleaned_data/statsdf/allmice/waterport_session_stats.pkl")
+    
+def plot_development(stats_df):
+    # 1) Accuracy & alternations
+    fig, ax1 = plt.subplots(figsize=(8, 4))
+    ax1.plot(stats_df['PctCorrect'], 'o-', label='% Correct', color='tab:blue')
+    ax1.set_ylabel('% Correct')
+    ax1.set_ylim(0, 100)
+
+    ax1.set_xticks(stats_df.index)
+    ax1.set_xticklabels(stats_df['Session'], rotation=45)
+    ax1.set_title('Performance over sessions')
+    fig.tight_layout()
+    fig.legend(loc='upper left', bbox_to_anchor=(0.05, 0.92))
+    plt.show()
+
+    # 2) Bias plot
+    plt.figure(figsize=(8, 4))
+    plt.plot(stats_df['BiasRight_FP'] * 100, 's-', color='purple', label='Right ward bias')
+    plt.axhline(50, ls='--', color='gray', alpha=.6)
+    plt.ylabel('Right side trial proportion (%)')
+    plt.xticks(stats_df.index, stats_df['Session'], rotation=45)
+    plt.ylim(0, 100)
+    plt.title('Right / Left bias over sessions')
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    
+    
+import seaborn as sns
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+from statsmodels.stats.anova import AnovaRM
+
+def plot_group_summary(stats_df):
+    # Convert session to datetime
+    stats_df["SessionDate"] = pd.to_datetime(stats_df["Session"], format="%y%m%d", errors="coerce")
+
+    # Filter out weekends or irrelevant entries
+    excluded_dates = [pd.Timestamp("2025-04-26"), pd.Timestamp("2025-04-27")]
+    df_filtered = stats_df[
+        (~stats_df["SessionDate"].isin(excluded_dates)) &
+        (stats_df["PctCorrect"].notna())
+    ]
+
+    # Create a categorical string label for x-axis to avoid time-based spacing
+    df_filtered["SessionLabel"] = df_filtered["SessionDate"].dt.strftime("%Y-%m-%d")
+    df_sorted = df_filtered.sort_values(["SessionDate", "Mouse"])
+
+    # Plot
+    plt.figure(figsize=(14, 6))
+    sns.lineplot(
+        data=df_sorted,
+        x="SessionLabel",  # categorical x-axis
+        y="PctCorrect",
+        hue="Mouse",
+        marker="o",
+        palette="tab10",
+        linewidth=1.5
+    )
+    plt.title("Correct First Decisions Over Time")
+    plt.xlabel("Session Date")
+    plt.ylabel("% Correct")
+    plt.xticks(rotation=45)
+    plt.ylim(0, 100)
+    plt.tight_layout()
+    plt.legend(title="Mouse ID")
+    plt.show()
+    
+def plot_plots_group_summary(stats_df):
+    # Convert session to datetime
+    stats_df["SessionDate"] = pd.to_datetime(stats_df["Session"], format="%y%m%d", errors="coerce")
+
+    # Filter out weekends or irrelevant entries
+    excluded_dates = [pd.Timestamp("2025-04-26"), pd.Timestamp("2025-04-27")]
+    df_filtered = stats_df[
+        (~stats_df["SessionDate"].isin(excluded_dates)) &
+        (stats_df["Trials"].notna())
+    ]
+
+    # Create a categorical string label for x-axis to avoid time-based spacing
+    df_filtered["SessionLabel"] = df_filtered["SessionDate"].dt.strftime("%Y-%m-%d")
+    df_sorted = df_filtered.sort_values(["SessionDate", "Mouse"])
+
+    # Plot
+    plt.figure(figsize=(14, 6))
+    sns.lineplot(
+        data=df_sorted,
+        x="SessionLabel",  # categorical x-axis
+        y="Trials",
+        hue="Mouse",
+        errorbar=("se", 2),
+        marker="o",
+        palette="tab10",
+        linewidth=1.5
+    )
+        
+    mean_per_session = df_sorted.groupby("SessionLabel")["Trials"].mean().reset_index()
+    sns.lineplot(
+        data=mean_per_session,
+        x="SessionLabel",
+        y="Trials",
+        color="black",
+        linestyle="--",
+        linewidth=2,
+        label="Session Mean"
+    )
+    plt.title("Initiated trials")
+    plt.xlabel("Session Date")
+    plt.ylabel("Trials")
+    plt.xticks(rotation=45)
+    plt.ylim(0, 170)
+    plt.tight_layout()
+    plt.legend(title="Mouse ID")
+    plt.show()
+    
+stats_df = pd.read_pickle('/Volumes/Expansion/New_cleaned_data/statsdf/allmice/waterport_session_stats.pkl')
+
+stats_df['TotalCorrect'] = (
+    ((stats_df['PctCorrect'] / 100) * stats_df['Trials'])
+    .round()
+    .where(stats_df['PctCorrect'].notna() & stats_df['Trials'].notna())
+    .astype('Int64')  # nullable integer type
+)
+print(stats_df['TotalCorrect'])
+#stat, p = friedmanchisquare(stats_df['TotalCorrect'])
+#print(f"Friedman χ² = {stat:.3f}, p = {p:.4f}")
+
+def plot_correct_group_summary(stats_df):
+    # Convert session to datetime
+    stats_df["SessionDate"] = pd.to_datetime(stats_df["Session"], format="%y%m%d", errors="coerce")
+
+    # Filter out weekends or irrelevant entries
+    excluded_dates = [pd.Timestamp("2025-04-26"), pd.Timestamp("2025-04-27")]
+    df_filtered = stats_df[
+        (~stats_df["SessionDate"].isin(excluded_dates)) &
+        (stats_df["TotalCorrect"].notna())
+    ]
+
+    df_filtered["SessionLabel"] = df_filtered["SessionDate"].dt.strftime("%Y-%m-%d")
+    df_sorted = df_filtered.sort_values(["SessionDate", "Mouse"])
+
+    # Plot
+    plt.figure(figsize=(14, 6))
+    sns.lineplot(
+        data=df_sorted,
+        x="SessionLabel",  # date as x-axis 
+        y="TotalCorrect",
+        hue="Mouse",
+        errorbar=("se", 2),
+        marker="o",
+        palette="tab10",
+        linewidth=1.5
+    )
+    mean_per_session2 = df_sorted.groupby("SessionLabel")["TotalCorrect"].mean().reset_index()
+    sns.lineplot(
+        data=mean_per_session2,
+        x="SessionLabel",
+        y="TotalCorrect",
+        color="black",
+        linestyle="--",
+        linewidth=2,
+        label="Session Mean"
+        )
+    plt.title("Correct trials")
+    plt.xlabel("Session Date")
+    plt.ylabel("Correct Trials")
+    plt.xticks(rotation=45)
+    plt.ylim(0, 170)
+    plt.tight_layout()
+    plt.legend(title="Mouse ID")
+    plt.show()
+
+#plot_plots_group_summary(stats_df)   
+#plot_correct_group_summary(stats_df)  
+#graph = plot_correct_group_summary(stats_df)       
+base_path = ''
+run_waterport_decision_analysis(
+        base_path=Path(base_path),
+        low=(158.0, 270.0),
+        high=(1055.9, 270.1),
+        radius=50.0,
+        bg_img=Path("/Volumes/Expansion/New_cleaned_data/box.jpg"), # put the related background image in here
+        out_dir=Path("/Volumes/Expansion/decisionchange") # select output path 
+        )
