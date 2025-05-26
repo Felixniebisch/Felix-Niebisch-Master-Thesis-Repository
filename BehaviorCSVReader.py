@@ -3,6 +3,9 @@
 Created on Fri Aug  9 17:03:00 2024
 
 @author: Gulraiz Iqbal Choudhary
+
+has been updated by me ( Felix Niebisch ) to also include the new assigned columns
+
 """
 
 import pandas as pd
@@ -18,6 +21,16 @@ class BehaviorCSVReader:
         # Initialize class members
         self.trial_times = []
         self.timestamps = []
+        self.first_touch = []
+        self.end_times = []
+        self.latency_corr = []
+        self.latency_incorr = []
+        self.correct_trials = []
+        self.incorrect_trials = []
+        self.change_choice = []
+        self.trial_windows = []
+        self.left_trial_windows = []
+        self.right_trial_windows = []
         self.s1 = []
         self.s2 = []
         self.s3 = []
@@ -32,12 +45,72 @@ class BehaviorCSVReader:
     def read_behavior_csv(self):
         # Read the CSV file line by line
         with open(os.path.join(self.data_dir, self.csv_file), 'r') as file:
-            for  line_number, line in enumerate(file, 1):
+            lines = list(file)
+            for i, line in enumerate(lines):
                 if 'Trial' in line:
                     parts = line.split(',')
                     time_stamp = int(parts[0])
-                    side = int(parts[1].split(':')[1].strip())
+                    side = int(parts[1].split(':')[1].strip().replace('"', ''))
                     self.trial_times.append((time_stamp, side))
+                    
+                    # Scan forward to find first sensor2 touch
+                    first_touch_time = None
+                    first_sensor = None
+                    for future_line in lines[i+1:]:             
+                        future_parts = future_line.strip().split(',')
+                        try:
+                            event_time = int(future_parts[0])
+                            l2 = int(future_parts[4])  # assuming column 5 is Left_sensor
+                            r2 = int(future_parts[5])  # assuming column 6 is Right_sensor
+                        
+                        except (ValueError, IndexError):
+                            continue 
+        
+                        if l2 == 1:
+                            first_touch_time = event_time
+                            
+                            
+                            first_sensor = 0
+                            
+                            if first_sensor == side:
+                                self.correct_trials.append(1)
+                                self.incorrect_trials.append(0)
+                                latency = first_touch_time - time_stamp
+                                self.latency_corr.append(latency) # latency to reach the left waterport
+                                self.end_times.append(first_touch_time)
+                                self.trial_windows.append((time_stamp, first_touch_time, side))
+                                self.left_trial_windows.append((time_stamp, first_touch_time, side))
+                            else:
+                                self.incorrect_trials.append(1)
+                                self.correct_trials.append(0)
+                                latency = first_touch_time - time_stamp
+                                self.latency_incorr.append(latency)
+                                self.end_times.append(first_touch_time)
+                                self.trial_windows.append((time_stamp, first_touch_time, side))
+                                self.left_trial_windows.append((time_stamp, first_touch_time, side))
+                            break
+                        elif r2 == 1:
+                            first_touch_time = event_time
+                            
+                            first_sensor = 1
+                            
+                            if first_sensor == side:
+                                self.correct_trials.append(1)
+                                self.incorrect_trials.append(0)
+                                latency = first_touch_time - time_stamp
+                                self.latency_corr.append(latency) 
+                                self.end_times.append(first_touch_time)
+                                self.trial_windows.append((time_stamp, first_touch_time, side))
+                                self.right_trial_windows.append((time_stamp, first_touch_time, side))
+                            else:
+                                self.incorrect_trials.append(1)
+                                self.correct_trials.append(0)
+                                latency = first_touch_time - time_stamp
+                                self.latency_incorr.append(latency) 
+                                self.end_times.append(first_touch_time)
+                                self.trial_windows.append((time_stamp, first_touch_time, side))
+                                self.right_trial_windows.append((time_stamp, first_touch_time, side))
+                            break
                 elif 'slow' in line:
                     continue  # Handle 'slow' entries if needed
                 elif 'CAP' in line:
@@ -47,7 +120,7 @@ class BehaviorCSVReader:
                 elif 'STARTING_MODE' in line:
                     self.training_type = int(line.split('=')[1].strip())
                 elif 'Starting protocol'in line:
-                    self.protocol_index = line_number+1
+                    self.protocol_index = i + 1
                 else:
                     parts = line.split(',')
                     if len(parts) == 5:
@@ -72,18 +145,33 @@ class BehaviorCSVReader:
 
         # Generate the processed DataFrame as done in the earlier code
         df = pd.read_csv(os.path.join(self.data_dir, self.csv_file), header=None, 
-                         skiprows=self.protocol_index, skipfooter=4, engine='python')#warn_bad_lines=True)  # Warn about skipped lines)
+                         skiprows=self.protocol_index, skipfooter=4, engine='python', on_bad_lines='skip')#warn_bad_lines=True)  # Warn about skipped lines)
         data = []
         current_trial = None
+        
         for index, row in df.iterrows():
-            if pd.isna(row[1]) is False and re.match(r'\s*Trial:\s*\d+', row[1]):
-                current_trial = int(row[1].split(':')[1].strip())
+            # Clean second column if it exists
+            if len(row) > 1 and pd.notna(row.iloc[1]):
+                value = str(row.iloc[1]).replace('"', '').strip()
+                if re.match(r'^Trial:\s*\d+', value):
+                    try:
+                        trial_num = int(re.search(r'Trial:\s*(\d+)', value).group(1))
+                        current_trial = trial_num
+                    except Exception as e:
+                        print(f"Failed to extract trial number at row {index}: {value}")
+                    continue  # Skip this row — it's not data
+        
+            # Sensor data row
+            row_values = list(row)
+            if len(row_values) < 7:
+                print(f"Skipping short row at index {index}: {row_values}")
                 continue
-            new_row = list(row) + [current_trial]
-            current_trial = None
+        
+            new_row = row_values[:7] + [current_trial]
+            current_trial = None  # Only apply to next row
             data.append(new_row)
 
-        new_columns = ['Timestamp', 'Right Sensor', 'Left Sensor', 'Middle Sensor', 'Status', 'Trial']
+        new_columns = ['Timestamp', 'Right Sensor', 'Left Sensor', 'Middle Sensor','Leftsensor2', 'Rightsensor2', 'Status', 'Trial'] # this needs to be adjusted in correspondence to the real new sensor
         self.processed_df = pd.DataFrame(data, columns=new_columns)
         self.processed_df.set_index('Timestamp', inplace=True)
         self.processed_df['Status'] = self.processed_df['Status'].astype(str).fillna('')
@@ -126,7 +214,15 @@ class BehaviorCSVReader:
             'HoldingTime': self.holding_time,
             'SensorThreshold': self.thres,
             'TrainingType': self.training_type,
-            'ProcessedData': self.processed_df
+            'ProcessedData': self.processed_df,
+            'CorrectTrials': self.correct_trials,
+            'IncorrectTrials': self.incorrect_trials,
+            'LatencyCorrect': self.latency_corr,
+            'LatencyIncorrect': self.latency_incorr,
+            'EndTimes': self.end_times,
+            'TrialWindows': self.trial_windows,
+            'LeftWindows' : self.left_trial_windows,
+            'RightWindows': self.right_trial_windows
         }
         
         save_path = os.path.join(self.data_dir, 'InfoSensors.pkl')
@@ -146,5 +242,4 @@ class BehaviorCSVReader:
         pd.to_pickle(self.info_sensors, save_path)
   
         return self.processed_df, self.info_sensors
-
 
