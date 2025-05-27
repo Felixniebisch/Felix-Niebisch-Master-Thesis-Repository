@@ -11,6 +11,10 @@ Mouse-folder (Base path
  |  |  
  |  +-- dlc_filtered.csv
 
+
+ ![grafik](https://github.com/user-attachments/assets/5175a9f8-5d27-46e9-a617-31c45f5cb59f)
+
+
    
 
 
