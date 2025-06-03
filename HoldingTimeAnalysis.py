@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Apr  1 11:20:54 2025
-
 @author: felix
 """
-
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,9 +12,7 @@ import os
 import matplotlib.ticker as ticker
 import matplotlib.pyplot as plt
 from scipy.stats import ttest_ind
-from datetime import datetime
-
-
+import seaborn as sns
 class HoldingTimeAnalysis:
     def __init__(self, threshold=30):
         self.threshold = threshold
@@ -29,7 +26,8 @@ class HoldingTimeAnalysis:
             print(f' we are now processing: {csv_path}')
             # Read the CSV file
             df = pd.read_csv(
-                csv_path, 
+                csv_path,
+                sep=None,
                 skiprows=71,  
                 engine='python',
                 on_bad_lines='skip',
@@ -37,15 +35,15 @@ class HoldingTimeAnalysis:
             )
             
            
-            #print("Detected Columns Before Renaming:", list(df.columns))
+            print("Detected Columns Before Renaming:", list(df.columns))
 
             # Keep only the first 5 columns 
-            if df.shape[1] > 5:
-                df = df.iloc[:, :5]
+            if df.shape[1] > 7:
+                df = df.iloc[:, :7]
                 
             # Rename columns to the expected names
-            df.columns = ['Timestamp', 'Right sensor', 'Left sensor', 'Middle_sensor', 'status'] #change the random names to the respective variables later on 
-
+            df.columns = ['Timestamp', 'Right sensor', 'Left sensor', 'Middle_sensor', "Left_sensor2","Right_sensor2" , 'status'] #change the random names to the respective variables later on 
+            print(df)
             # Convert the 'Timestamp' column to numeric
             df['Timestamp'] = pd.to_numeric(df['Timestamp'], errors='coerce')
             df.dropna(subset=['Timestamp'], inplace=True)  # Remove rows where Timestamp couldn't be converted
@@ -68,7 +66,7 @@ class HoldingTimeAnalysis:
        are added into a dictionary with their corresponding starting time, ending time and total interval length'''
        
        #skip_status = {'	xxxxGx', 'xxTxGx', 'xxT1Gx', 'xxx2Gx', 'xxx1Gx' } # manually skipping rows
-       Trial_threshold = 50 # the threshold value that is needed to initiate a trial
+       Trial_threshold = 100 # the threshold value that is needed to initiate a trial
        Middle = df['Middle_sensor']
        Timestamp = df['Timestamp_ms']
        Status = df['status']
@@ -144,7 +142,7 @@ class HoldingTimeAnalysis:
            axis.set_xlabel("Holding time duration displayed in 20 ms bins")
            axis.set_ylabel("The number of events these holding times have occurred")
            axis.set_title(file_name)
-           axis.set_ylim(0, 200)  
+           axis.set_ylim(0, 75)  
            plt.tight_layout()
            plt.show()  
 
@@ -171,8 +169,8 @@ class HoldingTimeAnalysis:
             plt.show()
             
 
-            
- def plot_scatter_and_ttest(self, box_intervals, session_labels=None, mouse_id="Unknown"):
+
+    def plot_scatter_and_ttest(self, box_intervals, session_labels=None, mouse_id="Unknown"):
         """
         Plots scattered points per session and computes t-test for first vs. last session.
         Also collects and returns a session-wise DataFrame of event counts >100ms.
@@ -234,7 +232,6 @@ class HoldingTimeAnalysis:
         return count_df
 
 
-
     def process_all_subfolders(self, base_path):
         all_intervals = []
         box_intervals = []
@@ -251,16 +248,32 @@ class HoldingTimeAnalysis:
                         print(f" Processing CSV: {sensor_csv_path}")
 
                         df = self.load_and_prepare_data(sensor_csv_path)
-                        file_name = file[13:19]  # Adjust this slicing as needed
+                        try:
+                            basename = os.path.basename(file)
+                            parts = basename.split('-')
+                            date_part = parts[1]  # '250310'
+                            dt = datetime.strptime(date_part, "%y%m%d")
+                            file_name = dt.strftime("%Y-%m-%d")  # Clean date string for plotting
+                        except Exception as e:
+                            print(f"Failed to parse datetime from filename {file}: {e}")
+                            # fallback: still create a sortable valid date string
+                            file_index = len(all_intervals) + 1
+                            file_name = f"2025-01-{file_index:02}"
 
                         if df is not None:
                             self.detect_intervals(df, file_name)
                             self.plot_Intervals(file_name)
-
-                            median_value = self.processed_df["Bin_20ms"].median()
-                            medians = {"Interval": median_value, "File": file_name}
-                            all_intervals.append(medians)
-                            box_intervals.append(self.processed_df["Interval"])
+                            
+                            if "Bin_20ms" not in self.processed_df.columns or self.processed_df["Bin_20ms"].dropna().shape[0] < 2:
+                                continue
+                            try:
+                                median_value = self.processed_df["Bin_20ms"].median()
+                                medians = {"Interval": median_value, "File": file_name}
+                                all_intervals.append(medians)
+                                box_intervals.append(self.processed_df["Interval"])
+                            except Exception as e:
+                                print(f"Error processing medians for {file_name}: {e}")
+                                
     
     
     
@@ -270,7 +283,6 @@ class HoldingTimeAnalysis:
             axi.set_xlabel("Files")
             axi.set_ylabel("Holding Time Duration (ms)")
             axi.set_title("Boxplot of Holding Time for All Files")
-            axi.legend(f" Median = {median_value}")
             plt.tight_layout()
             plt.show()
                 
@@ -327,7 +339,7 @@ class HoldingTimeAnalysis:
             ax.set_ylabel("Holding Duration (ms)", fontsize=11)
             ax.set_title("Per-Trial Mean Holding Duration with ±1 SD", fontsize=12)
         
-            ax.set_ylim(0, 1000)  # ✅ force x-axis from 0 to 1000
+            ax.set_ylim(0, 1500)  #
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
             ax.tick_params(direction='out', length=4, width=1)
@@ -336,11 +348,14 @@ class HoldingTimeAnalysis:
             plt.legend()
             plt.tight_layout()
             plt.show()        
+            
+            session_labels = [entry['File'] for entry in all_intervals]
             self.plot_scatter_and_ttest(box_intervals, session_labels, mouse_id="1797")
+            
         if all_intervals:
             
             all_medians_df = pd.DataFrame(all_intervals)
-    
+            all_medians_df.to_csv("/Users/medians/17971csv")
             split_point = len(all_medians_df) // 2
             all_medians_df["Trial"] = all_medians_df.index + 1
             all_medians_df["Phase"] = ["Early" if i < split_point else "Late" for i in all_medians_df.index]
@@ -359,10 +374,8 @@ class HoldingTimeAnalysis:
             plt.plot(all_medians_df["Trial"], median, color='blue', label='Median Holding Duration')
             plt.fill_between(all_medians_df["Trial"], q25, q75, color='blue', alpha=0.2, label='25–75% IQR')
             
-            # Optional: Add vertical line to indicate phase transition
-            #plt.axvline(split_point + 0.5, linestyle='--', color='black', label='Early/Late Split')
+
             
-            # Labels, legend, etc.
             plt.xlabel("Trial Block Index")
             plt.ylabel("Holding Duration (ms)")
             plt.title("Median Holding Duration per Trial with IQR")
@@ -370,59 +383,13 @@ class HoldingTimeAnalysis:
             plt.grid(True, alpha=0.5)
             plt.tight_layout()
             plt.show()
-        
+            
+            return all_medians_df
 
 
+base_path = ""
 
+analyzer = HoldingTimeAnalysis(threshold=30)
+prepare_data = analyzer.process_all_subfolders(base_path)
 
-
-    
-
-
-
-
-
-
-    
-
-
-
-
-
-#csv = pd.read_csv('/Volumes/Expansion/tests/csv_new/csv2.csv')
-
-
-
-
-#Threshold = 30 
-
-
-
-
-
-#proc_df.plot(x= "Start_time", y="Interval", kind="bar")
-#plt.show
-
-#print(proc_df)
-#array = np.array(Intervals)
-#print(array.argmax)
-long_intervals = []
-#print(type(Intervals))
-
-#for interval in array:
-
-#    if interval >= 200:
-#        long_intervals.append(interval)
-    
-    
-#print(f' The long interval is : {long_intervals}')
-
-#mean_in = sum(long_intervals) /len(long_intervals)
-#print(len(long_intervals))
-#print(mean_in)           
-        
-       # print(lenrow['Timestamp_ms'])
-    
-    #print(f'{row["Timestamp_ms"]}: Middle value: {row["Middle_sensor"]}')
-        
 
